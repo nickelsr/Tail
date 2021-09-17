@@ -10,44 +10,87 @@ from pathlib import Path
 
 
 class Tail(object):
+    """Prints tail-end of files and their subsequent updates.
+
+    Class Vars:
+    BLOCK_SIZE (int): number of bytes to read into memory simultaneously
+
+    Instance Vars:
+    n
+    files
+    _lock
+
+    Methods:
+    tails()
+    followFile(file)
+    _lastNLines(file)
+    """
+
+    BLOCK_SIZE = 8192
+
     def __init__(self, fnames, n):
+        """Initialize Tail object.
+        
+        Parameters:
+        fnames [string]: Names of files to be tailed
+        n (int): Number of lines to print
+
+        Instance Vars:
+        files [File]: List of VALID File objects
+        n (int): Number of lines to print
+        _lock (threading.Lock): Threading Lock to ensure proper format of
+                                output when multiple files are being followed
+        """
         self.files = [f for f in [File(fn) for fn in fnames] if f.is_valid()]
         self.n = n
-        self.BLOCK_SIZE = 8192
         self._lock = Lock()
 
     def tails(self):
         """Print header and last N lines of file.
         
-        Only print header if given multiple files to read."""
+        Only print header if given multiple files to read.
+        """
         for i, f in enumerate(self.files):
             if len(self.files) > 1: print(f"\n==> {f.get_filename()} <==")
-            self._lastNLines(f, self.n)
+            self._lastNLines(f)
 
-    def _lastNLines(self, file, n):
-        """Print last N lines of file and update filesize."""
+    def _lastNLines(self, file):
+        """Print last N lines of file and update filesize.
+
+        Read in and output lines in 8kB blocks to limit memory use.
+        Begin reading from end of file to reduce time complexity from
+        O(sizeof(file)) to O(N) where N is number of lines to print.
+        
+        Parameters:
+        file (File): File object to be read from
+        """
         with open(file.get_filename(), "r") as f:
             newlines = 0
             pos = filesize = f.seek(0, os.SEEK_END)
-            while pos > 0 and newlines < n + 1:
-                if pos < self.BLOCK_SIZE: curr_block_size = pos
-                else: curr_block_size = self.BLOCK_SIZE
+            while pos > 0 and newlines < self.n + 1:
+                if pos < Tail.BLOCK_SIZE: curr_block_size = pos
+                else: curr_block_size = Tail.BLOCK_SIZE
                 pos -= curr_block_size
                 f.seek(pos)
                 block = f.read(curr_block_size)
                 newlines += block.count('\n')
-                if newlines >= n + 1:
+                if newlines >= self.n + 1:
                     nlList = [i for i, c in enumerate(block) if c == '\n']
-                    diff = n + 1 - newlines
+                    diff = self.n + 1 - newlines
                     offset = nlList[-diff] + 1
                     f.seek(pos + offset)
-            if newlines < n + 1:
+            if newlines < self.n + 1:
                 f.seek(0)
             while (f.tell() < filesize):
-                print(f.read(self.BLOCK_SIZE), end='')
+                print(f.read(Tail.BLOCK_SIZE), end='')
             file.update_pos(filesize)
 
     def followFile(self, file):
+        """Print new characters when file is appended to or overwritten.
+        
+        Parameters:
+        file (File): File object to be read from
+        """
         with self._lock:
             n = 1
             with open(file.get_filename(), "r") as f:
@@ -61,38 +104,73 @@ class Tail(object):
                 if f.tell() < curr_end:
                     print(f"\n==> {file.get_filename()} <==")
                 while f.tell() < curr_end:
-                    print(f.read(self.BLOCK_SIZE), end='')
+                    print(f.read(Tail.BLOCK_SIZE), end='')
                 file.update_pos(curr_end)
 
 
 class Follower(Thread):
+    """A Thread that executes its target function until interrupted."""
     def __init__(self, target, args):
+        """
+
+        Parameters:
+        target (function): Function to be executed
+        args (tuple): Arguments to pass to target function
+
+        Instance vars:
+        shutdown_flag (threading.Event): Flag to signal thread termination
+        target (function): Function to be executed
+        args (tuple): Arguments to pass to target function
+        """
         Thread.__init__(self)
         self.shutdown_flag = Event()
         self.target = target
         self.args = args
     
     def run(self):
+        """Execute target function until shutdown_flag signals termination."""
         while not self.shutdown_flag.is_set():
-            self.target(self.args)
+            self.target(*self.args)
             time.sleep(0.1)
 
 
 class File(object):
+    """Holds file information.
+    
+    Instance Vars:
+    filename (string): Name of file
+    pos (int): Byte position that last read ended on
+
+    Methods:
+    get_filename()
+    get_pos()
+    update_pos()
+    is_valid()
+    """
+
     def __init__(self, filename, pos=0):
+        """Initialize File object."""
         self.filename = filename
         self.pos = pos
 
     def get_filename(self):
+        """Returns filename (string)."""
         return self.filename
     
     def get_pos(self):
+        """Returns position (int)."""
         return self.pos
 
     def update_pos(self, pos):
+        """Updates position (int)."""
         self.pos = pos
 
     def is_valid(self):
+        """Checks if file exists and is readable.
+        
+        Returns:
+        Bool
+        """
         file = Path(self.get_filename())
         if not file.exists():
             print(f"tail: cannot open '{self.get_filename()}': " +
@@ -139,7 +217,7 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
     try:
         for f in t.files:
-            follower = Follower(target=t.followFile, args=f)
+            follower = Follower(target=t.followFile, args=(f,))
             threads.append(follower)
             follower.start()
         while True:
