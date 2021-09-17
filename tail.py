@@ -44,6 +44,14 @@ class Tail(object):
         self.files = [f for f in [File(fn) for fn in fnames] if f.is_valid()]
         self.n = n
         self._lock = Lock()
+    
+    def get_files(self):
+        """Returns files ([File])."""
+        return self.files
+    
+    def get_n(self):
+        """Returns n (int)."""
+        return self.n
 
     def tails(self):
         """Print header and last N lines of file.
@@ -132,6 +140,11 @@ class Follower(Thread):
         while not self.shutdown_flag.is_set():
             self.target(*self.args)
             time.sleep(0.1)
+    
+    def shutdown(self):
+        """Set shutdown_flag and terminate thread."""
+        self.shutdown_flag.set()
+        self.join()
 
 
 class File(object):
@@ -209,23 +222,22 @@ def main():
     args = parser.parse_args()
     if args.lines == None: args.lines = 10
     if args.lines < 0: args.lines = abs(args.lines)
-    t = Tail(args.FILE, args.lines)
-    t.tails()
+    tail = Tail(args.FILE, args.lines)
+    tail.tails()
     if not args.follow: return
     threads = []
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     try:
-        for f in t.files:
-            follower = Follower(target=t.followFile, args=(f,))
+        for f in tail.get_files():
+            follower = Follower(target=tail.followFile, args=(f,))
             threads.append(follower)
             follower.start()
         while True:
             time.sleep(0.1)
     except ServiceExit:
         for t in threads:
-            t.shutdown_flag.set()
-            t.join()
+            t.shutdown()
         print()
 
 if __name__ == '__main__':
