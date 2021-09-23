@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 import os
 import sys
@@ -53,6 +53,10 @@ class Tail(object):
         """Returns n (int)."""
         return self.n
 
+    def get_lock(self):
+        """Returns _lock (threading.Lock)."""
+        return self._lock
+
     def tails(self):
         """Print header and last N lines of file.
         
@@ -65,7 +69,7 @@ class Tail(object):
     def _lastNLines(self, file):
         """Print last N lines of file and update filesize.
 
-        Read in and output lines in 8kB blocks to limit memory use.
+        Read in and output lines in BLOCK_SIZE blocks to limit memory use.
         Begin reading from end of file to reduce time complexity from
         O(sizeof(file)) to O(N) where N is number of lines to print.
         
@@ -99,7 +103,7 @@ class Tail(object):
         Parameters:
         file (File): File object to be read from
         """
-        with self._lock:
+        with self.get_lock():
             n = 1
             with open(file.get_filename(), "r") as f:
                 curr_end = f.seek(0, os.SEEK_END)
